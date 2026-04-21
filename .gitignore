@@ -32,3 +32,4 @@ config.local.json
 # Uncomment if needed
 # data/
 # output/
+!access/frontend/*.accdb

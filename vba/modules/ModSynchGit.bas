@@ -3,49 +3,66 @@ Option Compare Database
 Option Explicit
 
 '============================================================
-' modExportAccessSource
+' modSynchGit
 '
-' Purpose:
-'   Export Access VBA modules and saved query SQL to text files
-'   for Git/GitHub version tracking.
+' Exports:
+'   VBA modules/classes/forms/reports
+'   Saved SQL queries
 '
-' Requirements:
-'   In Access:
-'   File > Options > Trust Center > Trust Center Settings > Macro Settings
-'   Enable: "Trust access to the VBA project object model"
+' Uses:
+'   tblRepoSettings
+'       SettingName = RepoRoot
+'       SettingValue = path to repo root
 '
-' Notes:
-'   - Standard modules export as .bas
-'   - Class modules export as .cls
-'   - Form/report code modules export as .cls
-'   - Saved queries export as .sql
-'   - System/temp queries are skipped
+' Creates:
+'   \backup
+'   \vba\modules
+'   \vba\classes
+'   \vba\forms
+'   \vba\reports
+'   \sql
+'
+' Keeps:
+'   one .bak copy before overwrite
 '============================================================
-
-Private Const REPO_ROOT As String = "c:\Users\Kschellinger\SJTPO_Git\RTP_Sorting_Engine"
 
 Public Sub ExportAccessSourceToRepo()
 
-    Dim exportRoot As String
+    On Error GoTo ErrHandler
 
-    exportRoot = REPO_ROOT
+    Dim repoRoot As String
 
-    EnsureFolder exportRoot
-    EnsureFolder exportRoot & "\vba"
-    EnsureFolder exportRoot & "\vba\modules"
-    EnsureFolder exportRoot & "\vba\classes"
-    EnsureFolder exportRoot & "\vba\forms"
-    EnsureFolder exportRoot & "\vba\reports"
-    EnsureFolder exportRoot & "\sql"
+    repoRoot = Nz(DLookup("SettingValue", _
+                          "tblRepoSettings", _
+                          "SettingName='RepoRoot'"), "")
 
-    ExportVBAComponents exportRoot
-    ExportSavedQueries exportRoot
+    If repoRoot = "" Then
+        MsgBox "RepoRoot not found in tblRepoSettings.", vbExclamation
+        Exit Sub
+    End If
 
-    MsgBox "Access source export complete:" & vbCrLf & exportRoot, vbInformation
+    EnsureFolder repoRoot
+    EnsureFolder repoRoot & "\backup"
+    EnsureFolder repoRoot & "\vba"
+    EnsureFolder repoRoot & "\vba\modules"
+    EnsureFolder repoRoot & "\vba\classes"
+    EnsureFolder repoRoot & "\vba\forms"
+    EnsureFolder repoRoot & "\vba\reports"
+    EnsureFolder repoRoot & "\sql"
+
+    ExportVBAComponents repoRoot
+    ExportSavedQueries repoRoot
+
+    MsgBox "Git sync complete.", vbInformation
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Git sync failed: " & Err.Description, vbCritical
 
 End Sub
 
-Private Sub ExportVBAComponents(ByVal exportRoot As String)
+
+Private Sub ExportVBAComponents(ByVal repoRoot As String)
 
     Dim vbComp As Object
     Dim outPath As String
@@ -56,47 +73,50 @@ Private Sub ExportVBAComponents(ByVal exportRoot As String)
 
         Select Case vbComp.Type
 
-            Case 1      ' Standard module
-                folderPath = exportRoot & "\vba\modules"
+            Case 1
+                folderPath = repoRoot & "\vba\modules"
                 fileExt = ".bas"
 
-            Case 2      ' Class module
-                folderPath = exportRoot & "\vba\classes"
+            Case 2
+                folderPath = repoRoot & "\vba\classes"
                 fileExt = ".cls"
 
-            Case 3      ' Form
-                folderPath = exportRoot & "\vba\forms"
+            Case 3
+                folderPath = repoRoot & "\vba\forms"
                 fileExt = ".cls"
 
-            Case 100    ' Document module / Report
+            Case 100
                 If Left(vbComp.Name, 6) = "Report" Then
-                    folderPath = exportRoot & "\vba\reports"
+                    folderPath = repoRoot & "\vba\reports"
                 ElseIf Left(vbComp.Name, 4) = "Form" Then
-                    folderPath = exportRoot & "\vba\forms"
+                    folderPath = repoRoot & "\vba\forms"
                 Else
-                    folderPath = exportRoot & "\vba\classes"
+                    folderPath = repoRoot & "\vba\classes"
                 End If
                 fileExt = ".cls"
 
             Case Else
-                folderPath = exportRoot & "\vba\classes"
+                folderPath = repoRoot & "\vba\classes"
                 fileExt = ".cls"
 
         End Select
 
         outPath = folderPath & "\" & CleanFileName(vbComp.Name) & fileExt
 
-        If FileExists(outPath) Then
-            Kill outPath
-        End If
+        BackupFile repoRoot, outPath
+
+        If FileExists(outPath) Then Kill outPath
 
         vbComp.Export outPath
+
+        Debug.Print "Exported: " & vbComp.Name
 
     Next vbComp
 
 End Sub
 
-Private Sub ExportSavedQueries(ByVal exportRoot As String)
+
+Private Sub ExportSavedQueries(ByVal repoRoot As String)
 
     Dim qdf As DAO.QueryDef
     Dim outPath As String
@@ -106,19 +126,43 @@ Private Sub ExportSavedQueries(ByVal exportRoot As String)
 
         If ShouldExportQuery(qdf.Name) Then
 
-            outPath = exportRoot & "\sql\" & CleanFileName(qdf.Name) & ".sql"
+            outPath = repoRoot & "\sql\" & CleanFileName(qdf.Name) & ".sql"
+
+            BackupFile repoRoot, outPath
+
+            If FileExists(outPath) Then Kill outPath
 
             fileNum = FreeFile
-
             Open outPath For Output As #fileNum
             Print #fileNum, qdf.sql
             Close #fileNum
+
+            Debug.Print "Exported: " & qdf.Name
 
         End If
 
     Next qdf
 
 End Sub
+
+
+Private Sub BackupFile(ByVal repoRoot As String, ByVal filePath As String)
+
+    Dim backupPath As String
+    Dim fileName As String
+
+    If Not FileExists(filePath) Then Exit Sub
+
+    fileName = Mid(filePath, InStrRev(filePath, "\") + 1)
+
+    backupPath = repoRoot & "\backup\" & fileName & ".bak"
+
+    If FileExists(backupPath) Then Kill backupPath
+
+    Name filePath As backupPath
+
+End Sub
+
 
 Private Function ShouldExportQuery(ByVal queryName As String) As Boolean
 
@@ -132,6 +176,7 @@ Private Function ShouldExportQuery(ByVal queryName As String) As Boolean
 
 End Function
 
+
 Private Sub EnsureFolder(ByVal folderPath As String)
 
     If Len(Dir(folderPath, vbDirectory)) = 0 Then
@@ -140,11 +185,13 @@ Private Sub EnsureFolder(ByVal folderPath As String)
 
 End Sub
 
+
 Private Function FileExists(ByVal filePath As String) As Boolean
 
     FileExists = (Len(Dir(filePath)) > 0)
 
 End Function
+
 
 Private Function CleanFileName(ByVal rawName As String) As String
 
@@ -164,3 +211,4 @@ Private Function CleanFileName(ByVal rawName As String) As String
     CleanFileName = s
 
 End Function
+

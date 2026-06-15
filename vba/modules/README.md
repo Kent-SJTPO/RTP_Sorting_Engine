@@ -1,0 +1,1 @@
+This repository contains the Microsoft Access VBA sorting engine used to evaluate RTP project funding awards across the planning horizon. The sorter applies project eligibility years, STBGP fund categories, TIP project treatment, inflation adjustment, residual fund pooling, and award logging to produce a reproducible project award sequence.
